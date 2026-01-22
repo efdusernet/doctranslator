@@ -14,12 +14,16 @@ const { ocrImageToText, translatePlainText } = require('./translateImage');
 dotenv.config();
 
 const app = express();
+
+const MAX_FILES = Number(process.env.MAX_FILES || 50);
+const IMAGE_BATCH_SIZE = Number(process.env.IMAGE_BATCH_SIZE || 10);
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     // translateDocument sync has practical limits; keep a sane cap server-side
     fileSize: 20 * 1024 * 1024,
-    files: 10
+    files: MAX_FILES
   }
 });
 
@@ -72,6 +76,26 @@ function isTruthy(value) {
   if (value == null) return false;
   const s = String(value).trim().toLowerCase();
   return s === 'true' || s === '1' || s === 'yes' || s === 'on';
+}
+
+async function asyncPool(poolLimit, items, iteratorFn) {
+  const ret = [];
+  const executing = new Set();
+
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    const p = Promise.resolve().then(() => iteratorFn(item, i));
+    ret.push(p);
+
+    executing.add(p);
+    p.finally(() => executing.delete(p));
+
+    if (executing.size >= poolLimit) {
+      await Promise.race(executing);
+    }
+  }
+
+  return Promise.all(ret);
 }
 
 function getUploadedFiles(req) {
@@ -158,8 +182,6 @@ app.post('/translate-doc', upload.single('file'), async (req, res) => {
 
     const sourceLanguageCode = req.body.from || undefined;
     const location = req.body.location || process.env.GCP_LOCATION || 'global';
-
-    const combineImages = isTruthy(req.body.combineImages);
     const mimeType =
       req.body.mimeType ||
       req.file.mimetype ||
@@ -252,7 +274,7 @@ app.post('/translate-image', upload.single('file'), async (req, res) => {
 app.post(
   '/api/translate',
   upload.fields([
-    { name: 'files', maxCount: 10 },
+    { name: 'files', maxCount: MAX_FILES },
     { name: 'file', maxCount: 1 }
   ]),
   async (req, res) => {
@@ -275,6 +297,8 @@ app.post(
     const sourceLanguageCode = req.body.from || undefined;
     const location = req.body.location || process.env.GCP_LOCATION || 'global';
 
+    const combineImages = isTruthy(req.body.combineImages);
+
     if (uploadedFiles.length > 1) {
       // If user asked for a single output and ALL files are images, return a single TXT.
       if (combineImages) {
@@ -289,15 +313,13 @@ app.post(
         const allImages = classified.every(({ effectiveMimeType }) => isImageMime(effectiveMimeType));
 
         if (allImages) {
-          let combined = '';
-          for (const { f } of classified) {
+          const results = await asyncPool(IMAGE_BATCH_SIZE, classified, async ({ f }) => {
             const title = f.originalname || 'image';
-            combined += `===== ${title} =====\n`;
+
             try {
               const ocrText = await ocrImageToText({ content: f.buffer });
               if (!ocrText.trim()) {
-                combined += '[ERRO] OCR não detectou texto.\n\n';
-                continue;
+                return { title, text: '[ERRO] OCR não detectou texto.' };
               }
 
               const { translatedText } = await translatePlainText({
@@ -308,11 +330,15 @@ app.post(
                 targetLanguageCode
               });
 
-              combined += (translatedText || '') + '\n\n';
+              return { title, text: translatedText || '' };
             } catch (err) {
-              combined += `[ERRO] ${err && err.message ? err.message : String(err)}\n\n`;
+              return { title, text: `[ERRO] ${err && err.message ? err.message : String(err)}` };
             }
-          }
+          });
+
+          const combined = results
+            .map((r) => `===== ${r.title} =====\n${r.text}\n`)
+            .join('\n');
 
           const filename = `images_${targetLanguageCode}_translations.txt`;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -438,6 +464,21 @@ app.post(
   }
   }
 );
+
+// Friendly Multer error handling (e.g. Too many files)
+app.use((err, _req, res, next) => {
+  if (err && err.name === 'MulterError') {
+    if (err.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).send(`Too many files. Max allowed is ${MAX_FILES}.`);
+    }
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).send('File too large. Max allowed is 20MB per file.');
+    }
+    return res.status(400).send(err.message);
+  }
+
+  return next(err);
+});
 
 function startServer(port = Number(process.env.PORT || 3003)) {
   const server = app.listen(port, () => {

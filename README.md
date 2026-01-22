@@ -8,6 +8,11 @@ Também inclui uma **interface web** para subir 1 ou mais arquivos e baixar a tr
 
 1) Garanta que `PORT=3003` (no `.env` ou via variável de ambiente).
 
+Opcional (uploads em lote):
+
+- `MAX_FILES` (padrão: 50): máximo de arquivos por envio
+- `IMAGE_BATCH_SIZE` (padrão: 10): tamanho do “lote” ao consolidar múltiplas imagens em um único TXT
+
 2) Instale dependências (uma vez):
 
 ```bash
