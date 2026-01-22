@@ -2,6 +2,8 @@
 
 CLI para traduzir documentos (PDF/DOCX/PPTX/XLSX) usando **Google Cloud Translation API v3 (Advanced)** — método `translateDocument` (síncrono).
 
+Também inclui uma **interface web** para subir 1 ou mais arquivos e baixar a tradução.
+
 ## 1) Pré-requisitos
 
 - Node.js 18+ (você está ok)
@@ -30,6 +32,10 @@ $env:GOOGLE_APPLICATION_CREDENTIALS = "C:\\caminho\\sa-key.json"
 
 Ou crie um `.env` (veja `.env.example`).
 
+Alternativa (local, sem JSON):
+
+- `gcloud auth application-default login`
+
 ## 3) Instalação
 
 ```bash
@@ -37,6 +43,31 @@ npm install
 ```
 
 ## 4) Uso
+
+## Uso via Web (recomendado)
+
+1) Crie um `.env` na raiz do projeto (não comite):
+
+```dotenv
+GCP_PROJECT_ID=gen-lang-client-0374851836
+GCP_LOCATION=global
+PORT=3003
+```
+
+2) Inicie o servidor:
+
+```bash
+npm run server
+```
+
+3) Abra:
+
+- `http://localhost:3003/`
+
+4) Selecione 1 ou mais arquivos e clique em **Traduzir**
+
+- 1 arquivo: baixa o arquivo traduzido (ou `.txt` para imagem)
+- 2+ arquivos: baixa `translations.zip`
 
 ### Traduzir um PDF
 
@@ -89,7 +120,7 @@ Endpoints:
 - `GET /health`
 - `POST /api/translate` (multipart/form-data)
 	- aceita PDF/DOCX/PPTX/XLSX e imagens PNG/JPG
-	- campos: `file`, `to`, `from` (opcional), `projectId` (opcional)
+	- campos: `files` (1..N), `to`, `from` (opcional)
 	- resposta: attachment (arquivo traduzido ou TXT)
 	- se enviar múltiplos arquivos (campo `files`), a resposta é um `translations.zip`
 - `POST /translate-doc` (multipart/form-data)
@@ -108,3 +139,10 @@ Exemplo imagem:
 ```powershell
 curl -F "file=@.\scan.png" -F "to=pt-BR" http://localhost:3003/translate-image
 ```
+
+## Screenshots
+
+Sugestão: coloque imagens em `docs/` e referencie aqui, por exemplo:
+
+- `docs/ui.png` (tela principal)
+- `docs/result-zip.png` (download do ZIP)
