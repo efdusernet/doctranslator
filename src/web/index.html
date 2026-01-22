@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DocTranslator</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --panel: #121a33;
+        --muted: #8ea0c7;
+        --text: #e9eeff;
+        --accent: #6aa6ff;
+        --danger: #ff6a8b;
+        --ok: #37d99c;
+        --border: rgba(255, 255, 255, 0.08);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        background: radial-gradient(1000px 600px at 20% 10%, rgba(106,166,255,.18), transparent 60%),
+          radial-gradient(900px 600px at 90% 0%, rgba(55,217,156,.12), transparent 55%),
+          var(--bg);
+        color: var(--text);
+      }
+      .wrap { max-width: 980px; margin: 48px auto; padding: 0 18px; }
+      .header {
+        display: flex;
+        gap: 16px;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 18px;
+      }
+      h1 { font-size: 22px; margin: 0; letter-spacing: .2px; }
+      .subtitle { color: var(--muted); font-size: 13px; }
+      .grid {
+        display: grid;
+        grid-template-columns: 1.2fr .8fr;
+        gap: 14px;
+      }
+      @media (max-width: 860px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+      .card {
+        background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        backdrop-filter: blur(10px);
+      }
+      label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 6px; }
+      input[type="text"], select {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(0,0,0,0.25);
+        color: var(--text);
+        outline: none;
+      }
+      input[type="file"] {
+        width: 100%;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px dashed rgba(255,255,255,0.18);
+        background: rgba(0,0,0,0.18);
+        color: var(--muted);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .btnbar { display: flex; gap: 10px; margin-top: 14px; }
+      button {
+        appearance: none;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px 14px;
+        background: rgba(106,166,255,0.16);
+        color: var(--text);
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button:disabled { opacity: .6; cursor: not-allowed; }
+      .ghost { background: transparent; }
+      .status { font-size: 13px; margin-top: 10px; color: var(--muted); }
+      .status.ok { color: var(--ok); }
+      .status.err { color: var(--danger); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      .preview {
+        height: 360px;
+        overflow: auto;
+        white-space: pre-wrap;
+        background: rgba(0,0,0,0.25);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        color: var(--text);
+      }
+      .hint { font-size: 12px; color: var(--muted); line-height: 1.5; }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: rgba(0,0,0,0.2);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="header">
+        <div>
+          <h1>DocTranslator</h1>
+          <div class="subtitle">Envie PDF/DOCX/PPTX/XLSX ou imagem (PNG/JPG) e baixe a tradução.</div>
+        </div>
+        <div class="pill"><span>API</span> <span class="mono">/api/translate</span></div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <form id="form">
+            <label>Arquivos (1 ou mais)</label>
+            <input id="file" type="file" name="files" multiple accept=".pdf,.docx,.pptx,.xlsx,.png,.jpg,.jpeg,application/pdf,image/*" required />
+
+            <div class="row">
+              <div>
+                <label>Idioma de destino (to)</label>
+                <input id="to" type="text" name="to" placeholder="pt-BR" value="pt-BR" required />
+              </div>
+              <div>
+                <label>Idioma de origem (from) (opcional)</label>
+                <input id="from" type="text" name="from" placeholder="en" />
+              </div>
+            </div>
+
+            <div class="btnbar">
+              <button id="submit" type="submit">Traduzir</button>
+              <button id="clear" type="button" class="ghost">Limpar</button>
+            </div>
+
+            <div id="status" class="status"></div>
+            <div class="hint">
+              Dica: para PDFs/DOCX/PPTX/XLSX o resultado é um arquivo traduzido. Para imagens, o resultado é um TXT. Se você enviar mais de 1 arquivo, o resultado será um <span class="mono">translations.zip</span>.
+            </div>
+          </form>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <div>
+              <div style="font-weight:700;">Prévia (quando for texto)</div>
+              <div class="subtitle">Imagens retornam texto; PDFs retornam arquivo.</div>
+            </div>
+            <button id="download" class="ghost" disabled>Baixar último resultado</button>
+          </div>
+          <div style="height:10px"></div>
+          <div id="preview" class="preview"></div>
+        </div>
+      </div>
+
+      <div class="hint" style="margin-top:14px;">
+        Status: <a href="/health" target="_blank" rel="noreferrer">/health</a>
+      </div>
+    </div>
+
+    <script>
+      const form = document.getElementById('form');
+      const statusEl = document.getElementById('status');
+      const previewEl = document.getElementById('preview');
+      const downloadBtn = document.getElementById('download');
+      const clearBtn = document.getElementById('clear');
+
+      let lastBlob = null;
+      let lastFilename = null;
+      let lastContentType = null;
+
+      function setStatus(message, kind) {
+        statusEl.textContent = message;
+        statusEl.className = 'status' + (kind ? ' ' + kind : '');
+      }
+
+      function parseFilenameFromDisposition(disposition) {
+        if (!disposition) return null;
+        const match = /filename="?([^";]+)"?/i.exec(disposition);
+        return match ? match[1] : null;
+      }
+
+      function setDownload(blob, filename, contentType) {
+        lastBlob = blob;
+        lastFilename = filename;
+        lastContentType = contentType;
+        downloadBtn.disabled = !blob;
+      }
+
+      downloadBtn.addEventListener('click', () => {
+        if (!lastBlob) return;
+        const url = URL.createObjectURL(lastBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = lastFilename || 'translated';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 500);
+      });
+
+      clearBtn.addEventListener('click', () => {
+        previewEl.textContent = '';
+        setStatus('', '');
+        setDownload(null, null, null);
+        form.reset();
+        document.getElementById('to').value = 'pt-BR';
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const fileInput = document.getElementById('file');
+        if (!fileInput.files || fileInput.files.length === 0) {
+          setStatus('Selecione um arquivo.', 'err');
+          return;
+        }
+
+        const fd = new FormData();
+        for (const f of fileInput.files) {
+          fd.append('files', f);
+        }
+        fd.append('to', document.getElementById('to').value.trim());
+
+        const from = document.getElementById('from').value.trim();
+        if (from) fd.append('from', from);
+
+        setStatus('Enviando e traduzindo...', '');
+        previewEl.textContent = '';
+        setDownload(null, null, null);
+        downloadBtn.disabled = true;
+
+        const btn = document.getElementById('submit');
+        btn.disabled = true;
+
+        try {
+          const resp = await fetch('/api/translate', { method: 'POST', body: fd });
+
+          const contentType = resp.headers.get('content-type') || '';
+          const disposition = resp.headers.get('content-disposition') || '';
+          const filename = parseFilenameFromDisposition(disposition) || 'translated';
+
+          if (!resp.ok) {
+            const text = await resp.text();
+            setStatus(text || `Erro HTTP ${resp.status}`, 'err');
+            btn.disabled = false;
+            return;
+          }
+
+          const blob = await resp.blob();
+          setDownload(blob, filename, contentType);
+
+          if (contentType.includes('text/plain')) {
+            const txt = await blob.text();
+            previewEl.textContent = txt;
+            setStatus('OK (texto). Você pode baixar o arquivo.', 'ok');
+          } else if (contentType.includes('application/zip')) {
+            previewEl.textContent = 'Resultado gerado como ZIP. Clique em "Baixar último resultado".';
+            setStatus('OK (zip).', 'ok');
+          } else {
+            previewEl.textContent = 'Resultado gerado como arquivo. Clique em "Baixar último resultado".';
+            setStatus('OK (arquivo).', 'ok');
+          }
+        } catch (err) {
+          setStatus(err && err.message ? err.message : String(err), 'err');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

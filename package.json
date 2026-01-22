@@ -1,0 +1,28 @@
+{
+  "name": "doc-translator",
+  "version": "0.1.0",
+  "description": "CLI para traduzir documentos usando Google Cloud Translation API v3 (Advanced)",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/cli.js",
+  "bin": {
+    "doc-translator": "src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "server": "node src/server.js",
+    "translate": "node src/cli.js translate-doc",
+    "test": "node src/cli.js --help"
+  },
+  "dependencies": {
+    "@google-cloud/translate": "^9.0.0",
+    "@google-cloud/vision": "^4.3.2",
+    "archiver": "^7.0.1",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "google-auth-library": "^9.14.2",
+    "mime-types": "^2.1.35",
+    "multer": "^1.4.5-lts.1"
+  }
+}
