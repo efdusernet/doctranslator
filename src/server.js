@@ -66,6 +66,14 @@ function isImageMime(mimeType) {
   return typeof mimeType === 'string' && mimeType.startsWith('image/');
 }
 
+function isTruthy(value) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value == null) return false;
+  const s = String(value).trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'yes' || s === 'on';
+}
+
 function getUploadedFiles(req) {
   // Supports:
   // - upload.single('file') -> req.file
@@ -150,6 +158,8 @@ app.post('/translate-doc', upload.single('file'), async (req, res) => {
 
     const sourceLanguageCode = req.body.from || undefined;
     const location = req.body.location || process.env.GCP_LOCATION || 'global';
+
+    const combineImages = isTruthy(req.body.combineImages);
     const mimeType =
       req.body.mimeType ||
       req.file.mimetype ||
@@ -266,6 +276,51 @@ app.post(
     const location = req.body.location || process.env.GCP_LOCATION || 'global';
 
     if (uploadedFiles.length > 1) {
+      // If user asked for a single output and ALL files are images, return a single TXT.
+      if (combineImages) {
+        const classified = uploadedFiles.map((f) => {
+          const uploadMime = f.mimetype || '';
+          const fallbackMime = inferMimeTypeFromName(f.originalname);
+          const effectiveMimeType =
+            uploadMime && uploadMime !== 'application/octet-stream' ? uploadMime : fallbackMime;
+          return { f, effectiveMimeType };
+        });
+
+        const allImages = classified.every(({ effectiveMimeType }) => isImageMime(effectiveMimeType));
+
+        if (allImages) {
+          let combined = '';
+          for (const { f } of classified) {
+            const title = f.originalname || 'image';
+            combined += `===== ${title} =====\n`;
+            try {
+              const ocrText = await ocrImageToText({ content: f.buffer });
+              if (!ocrText.trim()) {
+                combined += '[ERRO] OCR não detectou texto.\n\n';
+                continue;
+              }
+
+              const { translatedText } = await translatePlainText({
+                projectId,
+                location,
+                text: ocrText,
+                sourceLanguageCode,
+                targetLanguageCode
+              });
+
+              combined += (translatedText || '') + '\n\n';
+            } catch (err) {
+              combined += `[ERRO] ${err && err.message ? err.message : String(err)}\n\n`;
+            }
+          }
+
+          const filename = `images_${targetLanguageCode}_translations.txt`;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+          return res.status(200).send(combined);
+        }
+      }
+
       await respondZip(res, 'translations.zip', async (archive) => {
         for (const f of uploadedFiles) {
           const uploadMime = f.mimetype || '';

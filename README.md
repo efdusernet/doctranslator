@@ -87,7 +87,8 @@ npm run server
 4) Selecione 1 ou mais arquivos e clique em **Traduzir**
 
 - 1 arquivo: baixa o arquivo traduzido (ou `.txt` para imagem)
-- 2+ arquivos: baixa `translations.zip`
+- 2+ arquivos: por padrão baixa `translations.zip`
+- 2+ imagens: você pode marcar a opção para gerar um único `.txt` consolidado
 
 ### Traduzir um PDF
 

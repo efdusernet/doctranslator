@@ -141,6 +141,11 @@
               </div>
             </div>
 
+            <label>
+              <input id="combineImages" type="checkbox" />
+              Quando enviar múltiplas imagens, gerar um único TXT (em vez de ZIP)
+            </label>
+
             <div class="btnbar">
               <button id="submit" type="submit">Traduzir</button>
               <button id="clear" type="button" class="ghost">Limpar</button>
@@ -234,6 +239,9 @@
           fd.append('files', f);
         }
         fd.append('to', document.getElementById('to').value.trim());
+
+        const combineImages = document.getElementById('combineImages').checked;
+        if (combineImages) fd.append('combineImages', 'true');
 
         const from = document.getElementById('from').value.trim();
         if (from) fd.append('from', from);
