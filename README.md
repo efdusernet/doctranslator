@@ -4,6 +4,26 @@ CLI para traduzir documentos (PDF/DOCX/PPTX/XLSX) usando **Google Cloud Translat
 
 Também inclui uma **interface web** para subir 1 ou mais arquivos e baixar a tradução.
 
+## Inicializar o servidor (porta 3003)
+
+1) Garanta que `PORT=3003` (no `.env` ou via variável de ambiente).
+
+2) Instale dependências (uma vez):
+
+```bash
+npm install
+```
+
+3) Inicie o servidor:
+
+```bash
+npm run server
+```
+
+4) Abra no navegador:
+
+- `http://localhost:3003/`
+
 ## 1) Pré-requisitos
 
 - Node.js 18+ (você está ok)
