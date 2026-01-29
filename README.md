@@ -154,7 +154,7 @@ Endpoints:
 	- observação: em `combineAllToTxt`, documentos são traduzidos e então o texto é extraído (PDF/DOCX suportados). Outros formatos podem entrar como bloco `[UNSUPPORTED]`.
 	- `outputFormat`:
 		- `same` (padrão): mantém o formato original
-		- `docx`: converte **PDF nativo** para Word (DOCX) via **batchTranslateDocument** (requer `GCS_TRANSLATION_BUCKET`)
+		- `docx`: converte **PDF nativo** para Word (DOCX) via **batchTranslateDocument** (requer `GCS_TRANSLATION_BUCKET`, ex: `datatranslated` ou `gs://datatranslated`)
 - `POST /translate-doc` (multipart/form-data)
 	- campos: `file` (arquivo), `to` (idioma destino), `from` (opcional)
 - `POST /translate-image` (multipart/form-data)

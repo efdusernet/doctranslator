@@ -57,6 +57,14 @@ function makeGsUri(bucket, objectName) {
   return `gs://${bucket}/${stripLeadingSlash(objectName)}`;
 }
 
+function normalizeBucketName(bucketOrUri) {
+  if (!bucketOrUri) return '';
+  let s = String(bucketOrUri).trim();
+  if (s.toLowerCase().startsWith('gs://')) s = s.slice(5);
+  s = s.replace(/^\/+/, '');
+  return s.split('/')[0];
+}
+
 async function translatePdfToDocxBuffer({
   projectId = config.GCP_PROJECT_ID,
   location = config.GCP_LOCATION,
@@ -67,15 +75,16 @@ async function translatePdfToDocxBuffer({
 }) {
   if (!projectId) throw new Error('projectId é obrigatório');
   if (!targetLanguageCode) throw new Error('targetLanguageCode é obrigatório');
-  if (!gcsBucket) {
+  const bucketName = normalizeBucketName(gcsBucket);
+  if (!bucketName) {
     throw new Error(
-      'Para PDF→DOCX é necessário configurar GCS_TRANSLATION_BUCKET no .env (bucket do Cloud Storage).'
+      'Para PDF→DOCX é necessário configurar GCS_TRANSLATION_BUCKET no .env (ex: datatranslated ou gs://datatranslated).'
     );
   }
   if (!content || content.length === 0) throw new Error('content vazio');
 
   const storage = new Storage();
-  const bucket = storage.bucket(gcsBucket);
+  const bucket = storage.bucket(bucketName);
 
   const jobId = randomId();
   const inputObject = `doctranslator/input/${jobId}/input.pdf`;
@@ -94,13 +103,13 @@ async function translatePdfToDocxBuffer({
     targetLanguageCodes: [targetLanguageCode],
     inputConfigs: [
       {
-        gcsSource: { inputUri: makeGsUri(gcsBucket, inputObject) },
+        gcsSource: { inputUri: makeGsUri(bucketName, inputObject) },
         mimeType: 'application/pdf'
       }
     ],
     outputConfig: {
       gcsDestination: {
-        outputUriPrefix: makeGsUri(gcsBucket, outputPrefix)
+        outputUriPrefix: makeGsUri(bucketName, outputPrefix)
       }
     },
     formatConversions: {
