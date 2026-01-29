@@ -15,6 +15,7 @@ const config = {
     process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || '',
   GCP_LOCATION: process.env.GCP_LOCATION || 'global',
   // Required when using batch translation / PDF->DOCX conversion
+  // Set in .env, example: datatranslated (or gs://datatranslated)
   GCS_TRANSLATION_BUCKET: process.env.GCS_TRANSLATION_BUCKET || ''
 };
 

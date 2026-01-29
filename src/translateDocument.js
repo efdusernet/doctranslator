@@ -82,6 +82,12 @@ async function translatePdfToDocxBuffer({
     );
   }
   if (!content || content.length === 0) throw new Error('content vazio');
+  if (!sourceLanguageCode) {
+    throw new Error(
+      'Para PDF→DOCX (batch) é obrigatório informar o idioma de origem (campo from/sourceLanguageCode). '
+        + 'Exemplo: from=en'
+    );
+  }
 
   const storage = new Storage();
   const bucket = storage.bucket(bucketName);

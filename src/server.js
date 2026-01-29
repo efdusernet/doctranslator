@@ -297,25 +297,47 @@ app.post('/translate-doc', upload.single('file'), async (req, res) => {
 
     const sourceLanguageCode = req.body.from || undefined;
     const location = config.GCP_LOCATION;
+    const outputFormatRaw = String(req.body.outputFormat || 'same').trim().toLowerCase();
+    const outputFormat = outputFormatRaw === 'docx' || outputFormatRaw === 'word' ? 'docx' : 'same';
     const mimeType =
       req.body.mimeType ||
       req.file.mimetype ||
       inferMimeTypeFromName(req.file.originalname);
 
-    const { outputBuffer, outputMimeType, detectedLanguageCode } = await translateDocumentBuffer({
-      projectId,
-      location,
-      content: req.file.buffer,
-      mimeType,
-      sourceLanguageCode,
-      targetLanguageCode
-    });
+    if (outputFormat === 'docx' && (mimeType || '').toLowerCase() === 'application/pdf' && !sourceLanguageCode) {
+      return res.status(400).json({
+        error: 'Para converter PDF→DOCX é obrigatório informar o idioma de origem (campo from). Ex: from=en'
+      });
+    }
+
+    let output;
+    if (outputFormat === 'docx' && (mimeType || '').toLowerCase() === 'application/pdf') {
+      output = await translatePdfToDocxBuffer({
+        projectId,
+        location,
+        content: req.file.buffer,
+        sourceLanguageCode,
+        targetLanguageCode
+      });
+    } else {
+      output = await translateDocumentBuffer({
+        projectId,
+        location,
+        content: req.file.buffer,
+        mimeType,
+        sourceLanguageCode,
+        targetLanguageCode
+      });
+    }
+
+    const { outputBuffer, outputMimeType, detectedLanguageCode } = output;
 
     const base = req.file.originalname
       ? path.basename(req.file.originalname, path.extname(req.file.originalname))
       : 'document';
 
-    const filename = `${base}_${targetLanguageCode}_translations${path.extname(req.file.originalname || '')}`;
+    const outExt = extForMimeType(outputMimeType) || path.extname(req.file.originalname || '') || '';
+    const filename = `${base}_${targetLanguageCode}_translations${outExt}`;
 
     res.setHeader('Content-Type', outputMimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -418,6 +440,22 @@ app.post(
     const combineAllToTxt = isTruthy(req.body.combineAllToTxt);
     const outputFormatRaw = String(req.body.outputFormat || 'same').trim().toLowerCase();
     const outputFormat = outputFormatRaw === 'docx' || outputFormatRaw === 'word' ? 'docx' : 'same';
+
+    if (outputFormat === 'docx') {
+      const hasPdf = uploadedFiles.some((f) => {
+        const uploadMime = f.mimetype || '';
+        const fallbackMime = inferMimeTypeFromName(f.originalname);
+        const effectiveMimeType =
+          uploadMime && uploadMime !== 'application/octet-stream' ? uploadMime : fallbackMime;
+        return (effectiveMimeType || '').toLowerCase() === 'application/pdf';
+      });
+
+      if (hasPdf && !sourceLanguageCode) {
+        return res.status(400).send(
+          'Para converter PDF→DOCX é obrigatório informar o idioma de origem (campo from). Ex: from=en'
+        );
+      }
+    }
 
     if (uploadedFiles.length > 1) {
       if (combineAllToTxt) {
