@@ -103,6 +103,7 @@ async function translatePdfToDocxBuffer({
 
   const client = new TranslationServiceClient();
   const parent = `projects/${projectId}/locations/${location}`;
+  const model = `${parent}/models/general/nmt`;
 
   const request = {
     parent,
@@ -117,6 +118,9 @@ async function translatePdfToDocxBuffer({
       gcsDestination: {
         outputUriPrefix: makeGsUri(bucketName, outputPrefix)
       }
+    },
+    models: {
+      [targetLanguageCode]: model
     },
     formatConversions: {
       'application/pdf':
@@ -211,6 +215,7 @@ async function translatePdfWithSplittingIfNeeded({
 
   const client = new TranslationServiceClient();
   const parent = `projects/${projectId}/locations/${location}`;
+  const model = `${parent}/models/general/nmt`;
 
   const outputs = [];
   let detectedLanguageCode = '';
@@ -219,6 +224,7 @@ async function translatePdfWithSplittingIfNeeded({
     const request = {
       parent,
       targetLanguageCode,
+      model,
       documentInputConfig: {
         content: chunk,
         mimeType: 'application/pdf'
@@ -293,10 +299,12 @@ async function translateDocumentBuffer({
 
   const client = new TranslationServiceClient();
   const parent = `projects/${projectId}/locations/${location}`;
+  const model = `${parent}/models/general/nmt`;
 
   const request = {
     parent,
     targetLanguageCode,
+    model,
     documentInputConfig: {
       content,
       mimeType
