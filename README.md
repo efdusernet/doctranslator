@@ -123,6 +123,8 @@ node src/cli.js translate-doc -i ./arquivo -t pt-BR --project SEU_PROJECT_ID --m
 
 ## Observações importantes
 
+- PDFs com mais de 20 páginas: o modo síncrono do `translateDocument` tem limite de 20 páginas por requisição. Este projeto divide automaticamente PDFs maiores em blocos de 20 páginas, traduz e junta o PDF final.
+
 - `translateDocument` (síncrono) tem limites de tamanho/páginas (ex.: PDF até ~20MB e limite de páginas conforme doc).
 - Para **TXT/HTML** normalmente você usa `translateText` (não está implementado neste MVP).
 - Se você precisar traduzir muitos arquivos / arquivos grandes, o caminho ideal é `batchTranslateDocument` com entradas/saídas em **Cloud Storage**.
@@ -139,20 +141,21 @@ Abra no navegador:
 
 - `http://localhost:3003/`
 
-O Project ID é lido do servidor via `GCP_PROJECT_ID` (recomendado) ou inferido via ADC (gcloud).
+O Project ID é lido do servidor via `GCP_PROJECT_ID` (no `.env`).
 
 Endpoints:
 
 - `GET /health`
 - `POST /api/translate` (multipart/form-data)
 	- aceita PDF/DOCX/PPTX/XLSX e imagens PNG/JPG
-	- campos: `files` (1..N), `to`, `from` (opcional)
+	- campos: `files` (1..N), `to`, `from` (opcional), `combineImages` (opcional), `combineAllToTxt` (opcional), `betweenTranslationsLines` (opcional; apenas quando gerar TXT único)
 	- resposta: attachment (arquivo traduzido ou TXT)
 	- se enviar múltiplos arquivos (campo `files`), a resposta é um `translations.zip`
+	- observação: em `combineAllToTxt`, documentos são traduzidos e então o texto é extraído (PDF/DOCX suportados). Outros formatos podem entrar como bloco `[UNSUPPORTED]`.
 - `POST /translate-doc` (multipart/form-data)
-	- campos: `file` (arquivo), `to` (idioma destino), `from` (opcional), `projectId` (opcional; senão usa env)
+	- campos: `file` (arquivo), `to` (idioma destino), `from` (opcional)
 - `POST /translate-image` (multipart/form-data)
-	- campos: `file` (PNG/JPG), `to`, `from` (opcional), `projectId` (opcional; senão usa env)
+	- campos: `file` (PNG/JPG), `to`, `from` (opcional)
 
 Exemplo (PowerShell + curl):
 

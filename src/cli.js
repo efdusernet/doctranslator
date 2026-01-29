@@ -2,11 +2,10 @@
 
 const path = require('path');
 const { Command } = require('commander');
-const dotenv = require('dotenv');
 const { translateLocalDocument } = require('./translateDocument');
 const { translateLocalImage } = require('./translateImage');
 
-dotenv.config();
+const config = require('./config');
 
 const program = new Command();
 
@@ -21,22 +20,16 @@ program
   .requiredOption('-i, --in <path>', 'Caminho do arquivo de entrada (ex: ./arquivo.pdf)')
   .requiredOption('-t, --to <lang>', 'Idioma de destino (ex: pt-BR)')
   .option('-f, --from <lang>', 'Idioma de origem (ex: en). Se omitido, detecta automaticamente quando possível')
-  .option('--project <id>', 'Project ID do Google Cloud (ou use env GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT)')
-  .option('--location <loc>', 'Location (global, us-central1, etc). Padrão: global', process.env.GCP_LOCATION || 'global')
   .option('--mime <mimeType>', 'MIME type do documento. Se omitido, tenta inferir pela extensão')
   .option('-o, --out <path>', 'Caminho do arquivo de saída')
   .option('--native-pdf-only', 'Para PDFs: traduz apenas páginas nativas (limites maiores)', false)
   .option('--shadow-removal', 'Para PDFs: remove shadow text em imagem de fundo (se aplicável)', false)
   .option('--rotation-correction', 'Para PDFs: habilita correção automática de rotação', false)
   .action(async (opts) => {
-    const projectId =
-      opts.project ||
-      process.env.GCP_PROJECT_ID ||
-      process.env.GOOGLE_CLOUD_PROJECT ||
-      process.env.GCLOUD_PROJECT;
+    const projectId = config.GCP_PROJECT_ID;
 
     if (!projectId) {
-      console.error('Erro: informe --project ou defina GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT.');
+      console.error('Erro: defina GCP_PROJECT_ID no .env.');
       process.exitCode = 2;
       return;
     }
@@ -47,7 +40,7 @@ program
     try {
       const result = await translateLocalDocument({
         projectId,
-        location: opts.location,
+        location: config.GCP_LOCATION,
         inputPath,
         outputPath,
         mimeType: opts.mime,
@@ -76,18 +69,12 @@ program
   .requiredOption('-i, --in <path>', 'Caminho do arquivo de entrada (ex: ./scan.png)')
   .requiredOption('-t, --to <lang>', 'Idioma de destino (ex: pt-BR)')
   .option('-f, --from <lang>', 'Idioma de origem (ex: en). Se omitido, detecta automaticamente quando possível')
-  .option('--project <id>', 'Project ID do Google Cloud (ou use env GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT)')
-  .option('--location <loc>', 'Location (global, us-central1, etc). Padrão: global', process.env.GCP_LOCATION || 'global')
   .option('-o, --out <path>', 'Caminho do arquivo TXT de saída')
   .action(async (opts) => {
-    const projectId =
-      opts.project ||
-      process.env.GCP_PROJECT_ID ||
-      process.env.GOOGLE_CLOUD_PROJECT ||
-      process.env.GCLOUD_PROJECT;
+    const projectId = config.GCP_PROJECT_ID;
 
     if (!projectId) {
-      console.error('Erro: informe --project ou defina GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT.');
+      console.error('Erro: defina GCP_PROJECT_ID no .env.');
       process.exitCode = 2;
       return;
     }
@@ -98,7 +85,7 @@ program
     try {
       const result = await translateLocalImage({
         projectId,
-        location: opts.location,
+        location: config.GCP_LOCATION,
         inputPath,
         outputPath,
         sourceLanguageCode: opts.from,

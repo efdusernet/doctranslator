@@ -1,6 +1,8 @@
 const fs = require('fs/promises');
 const path = require('path');
 
+const config = require('./config');
+
 const { ImageAnnotatorClient } = require('@google-cloud/vision');
 const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 
@@ -26,8 +28,8 @@ async function ocrImageToText({ content }) {
 }
 
 async function translatePlainText({
-  projectId,
-  location = 'global',
+  projectId = config.GCP_PROJECT_ID,
+  location = config.GCP_LOCATION,
   text,
   sourceLanguageCode,
   targetLanguageCode
@@ -54,8 +56,8 @@ async function translatePlainText({
 }
 
 async function translateLocalImage({
-  projectId,
-  location = 'global',
+  projectId = config.GCP_PROJECT_ID,
+  location = config.GCP_LOCATION,
   inputPath,
   outputPath,
   sourceLanguageCode,

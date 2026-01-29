@@ -2,6 +2,10 @@ const fs = require('fs/promises');
 const path = require('path');
 const mime = require('mime-types');
 
+const config = require('./config');
+
+const { PDFDocument } = require('pdf-lib');
+
 const { TranslationServiceClient } = require('@google-cloud/translate').v3;
 
 const SUPPORTED_MIME_TYPES = new Set([
@@ -37,9 +41,102 @@ function extForMimeType(mimeType) {
   return ext ? `.${ext}` : undefined;
 }
 
-async function translateDocumentBuffer({
+async function splitPdfIntoChunks(inputBuffer, chunkSize) {
+  const src = await PDFDocument.load(inputBuffer);
+  const totalPages = src.getPageCount();
+  const size = Math.max(1, Math.floor(chunkSize));
+
+  const chunks = [];
+  for (let start = 0; start < totalPages; start += size) {
+    const end = Math.min(totalPages, start + size);
+    const doc = await PDFDocument.create();
+    const pageIndices = Array.from({ length: end - start }, (_v, i) => start + i);
+    const copied = await doc.copyPages(src, pageIndices);
+    copied.forEach((p) => doc.addPage(p));
+    const bytes = await doc.save();
+    chunks.push(Buffer.from(bytes));
+  }
+
+  return { totalPages, chunks };
+}
+
+async function mergePdfs(buffers) {
+  const out = await PDFDocument.create();
+  for (const b of buffers) {
+    const doc = await PDFDocument.load(b);
+    const indices = Array.from({ length: doc.getPageCount() }, (_v, i) => i);
+    const pages = await out.copyPages(doc, indices);
+    pages.forEach((p) => out.addPage(p));
+  }
+  const merged = await out.save();
+  return Buffer.from(merged);
+}
+
+async function translatePdfWithSplittingIfNeeded({
   projectId,
-  location = 'global',
+  location,
+  content,
+  sourceLanguageCode,
+  targetLanguageCode,
+  isTranslateNativePdfOnly,
+  enableShadowRemovalNativePdf,
+  enableRotationCorrection,
+  maxPagesPerRequest = 20
+}) {
+  const { totalPages, chunks } = await splitPdfIntoChunks(content, maxPagesPerRequest);
+
+  if (totalPages <= maxPagesPerRequest) {
+    return null;
+  }
+
+  const client = new TranslationServiceClient();
+  const parent = `projects/${projectId}/locations/${location}`;
+
+  const outputs = [];
+  let detectedLanguageCode = '';
+
+  for (const chunk of chunks) {
+    const request = {
+      parent,
+      targetLanguageCode,
+      documentInputConfig: {
+        content: chunk,
+        mimeType: 'application/pdf'
+      }
+    };
+
+    if (sourceLanguageCode) request.sourceLanguageCode = sourceLanguageCode;
+    if (typeof isTranslateNativePdfOnly === 'boolean') {
+      request.isTranslateNativePdfOnly = isTranslateNativePdfOnly;
+    }
+    if (typeof enableShadowRemovalNativePdf === 'boolean') {
+      request.enableShadowRemovalNativePdf = enableShadowRemovalNativePdf;
+    }
+    if (typeof enableRotationCorrection === 'boolean') {
+      request.enableRotationCorrection = enableRotationCorrection;
+    }
+
+    const [response] = await client.translateDocument(request);
+    const translation = response.documentTranslation;
+    if (!translation || !translation.byteStreamOutputs || translation.byteStreamOutputs.length < 1) {
+      throw new Error('Resposta inesperada: byteStreamOutputs vazio.');
+    }
+
+    detectedLanguageCode = detectedLanguageCode || translation.detectedLanguageCode || '';
+    outputs.push(normalizeBytesToBuffer(translation.byteStreamOutputs[0]));
+  }
+
+  const merged = await mergePdfs(outputs);
+  return {
+    outputBuffer: merged,
+    outputMimeType: 'application/pdf',
+    detectedLanguageCode
+  };
+}
+
+async function translateDocumentBuffer({
+  projectId = config.GCP_PROJECT_ID,
+  location = config.GCP_LOCATION,
   content,
   mimeType,
   sourceLanguageCode,
@@ -58,6 +155,20 @@ async function translateDocumentBuffer({
       `MIME type não suportado para translateDocument: ${mimeType}. ` +
         'Suportados: application/pdf, DOCX, PPTX, XLSX. '
     );
+  }
+
+  if (mimeType === 'application/pdf') {
+    const splitResult = await translatePdfWithSplittingIfNeeded({
+      projectId,
+      location,
+      content,
+      sourceLanguageCode,
+      targetLanguageCode,
+      isTranslateNativePdfOnly,
+      enableShadowRemovalNativePdf,
+      enableRotationCorrection
+    });
+    if (splitResult) return splitResult;
   }
 
   const client = new TranslationServiceClient();
@@ -102,8 +213,8 @@ async function translateDocumentBuffer({
 }
 
 async function translateLocalDocument({
-  projectId,
-  location = 'global',
+  projectId = config.GCP_PROJECT_ID,
+  location = config.GCP_LOCATION,
   inputPath,
   outputPath,
   mimeType,

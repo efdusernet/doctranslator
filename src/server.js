@@ -2,21 +2,19 @@
 
 const path = require('path');
 const express = require('express');
-const dotenv = require('dotenv');
 const multer = require('multer');
 const mimeTypes = require('mime-types');
-const { GoogleAuth } = require('google-auth-library');
 const archiver = require('archiver');
+
+const config = require('./config');
 
 const { translateDocumentBuffer } = require('./translateDocument');
 const { ocrImageToText, translatePlainText } = require('./translateImage');
 
-dotenv.config();
-
 const app = express();
 
-const MAX_FILES = Number(process.env.MAX_FILES || 50);
-const IMAGE_BATCH_SIZE = Number(process.env.IMAGE_BATCH_SIZE || 10);
+const MAX_FILES = config.MAX_FILES;
+const IMAGE_BATCH_SIZE = config.IMAGE_BATCH_SIZE;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -34,26 +32,8 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-async function getProjectId(req) {
-  const fromRequest = req.body && req.body.projectId;
-  const fromEnv =
-    process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
-
-  if (fromRequest) return fromRequest;
-  if (fromEnv) return fromEnv;
-
-  // Fallback: attempt to infer project from ADC (gcloud application-default login)
-  // or from the quota project embedded in application_default_credentials.json.
-  const auth = new GoogleAuth({
-    scopes: ['https://www.googleapis.com/auth/cloud-platform']
-  });
-
-  try {
-    const inferred = await auth.getProjectId();
-    return inferred || '';
-  } catch {
-    return '';
-  }
+function getProjectId() {
+  return config.GCP_PROJECT_ID;
 }
 
 function inferMimeTypeFromName(filename) {
@@ -76,6 +56,137 @@ function isTruthy(value) {
   if (value == null) return false;
   const s = String(value).trim().toLowerCase();
   return s === 'true' || s === '1' || s === 'yes' || s === 'on';
+}
+
+function parseSpacingLines(value) {
+  if (value == null || value === '') return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(20, Math.floor(n)));
+}
+
+function blockSeparator(title) {
+  return `===== ${title || 'file'} =====\n`;
+}
+
+function normalizeTextForTxt(value) {
+  if (!value) return '';
+  return String(value).replace(/\r\n/g, '\n');
+}
+
+function decodeXmlEntities(value) {
+  if (!value) return '';
+  return String(value)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+async function extractTextFromPptx(buffer) {
+  // eslint-disable-next-line global-require
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(buffer);
+  const slidePaths = Object.keys(zip.files)
+    .filter((p) => /^ppt\/slides\/slide\d+\.xml$/i.test(p))
+    .sort((a, b) => {
+      const na = Number((/slide(\d+)\.xml/i.exec(a) || [])[1] || 0);
+      const nb = Number((/slide(\d+)\.xml/i.exec(b) || [])[1] || 0);
+      return na - nb;
+    });
+
+  if (slidePaths.length === 0) return '';
+
+  let out = '';
+  for (let i = 0; i < slidePaths.length; i += 1) {
+    const xml = await zip.file(slidePaths[i]).async('string');
+    const texts = [];
+    const re = /<a:t[^>]*>([\s\S]*?)<\/a:t>/gi;
+    let m;
+    while ((m = re.exec(xml)) != null) {
+      const t = decodeXmlEntities(m[1]).trim();
+      if (t) texts.push(t);
+    }
+    if (texts.length > 0) {
+      out += `--- Slide ${i + 1} ---\n`;
+      out += `${texts.join(' ')}\n\n`;
+    }
+  }
+
+  return normalizeTextForTxt(out).trim();
+}
+
+async function extractTextFromXlsx(buffer) {
+  // eslint-disable-next-line global-require
+  const ExcelJS = require('exceljs');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  let out = '';
+  workbook.eachSheet((worksheet) => {
+    const rows = [];
+    worksheet.eachRow({ includeEmpty: false }, (row) => {
+      const cells = (row.values || [])
+        .slice(1)
+        .map((cell) => {
+          if (cell == null) return '';
+          if (typeof cell === 'object' && typeof cell.text === 'string') return cell.text;
+          if (typeof cell === 'object' && 'result' in cell) return String(cell.result ?? '');
+          return String(cell);
+        })
+        .map((v) => String(v).trim());
+
+      if (cells.some((c) => c.length > 0)) rows.push(cells.join(','));
+    });
+
+    const normalized = rows.join('\n').trim();
+    if (!normalized) return;
+    out += `--- Sheet: ${worksheet.name || 'Sheet'} ---\n`;
+    out += `${normalized}\n\n`;
+  });
+
+  return out.trim();
+}
+
+async function extractTextFromTranslatedDocument({ outputBuffer, outputMimeType, originalname }) {
+  const mimeType = (outputMimeType || '').toLowerCase();
+
+  if (mimeType === 'application/pdf') {
+    // Lazy require to avoid startup cost when unused
+    // eslint-disable-next-line global-require
+    const pdfParse = require('pdf-parse');
+    const data = await pdfParse(outputBuffer);
+    return normalizeTextForTxt(data && data.text ? data.text : '');
+  }
+
+  if (
+    mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  ) {
+    // eslint-disable-next-line global-require
+    const mammoth = require('mammoth');
+    const result = await mammoth.extractRawText({ buffer: outputBuffer });
+    return normalizeTextForTxt(result && result.value ? result.value : '');
+  }
+
+  if (
+    mimeType ===
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+  ) {
+    const text = await extractTextFromPptx(outputBuffer);
+    return normalizeTextForTxt(text);
+  }
+
+  if (
+    mimeType ===
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ) {
+    const text = await extractTextFromXlsx(outputBuffer);
+    return normalizeTextForTxt(text);
+  }
+
+  const name = originalname || 'document';
+  return `[UNSUPPORTED] Não foi possível extrair texto para TXT a partir de ${name} (${mimeType || 'mime desconhecido'}).\n`;
 }
 
 async function asyncPool(poolLimit, items, iteratorFn) {
@@ -158,16 +269,14 @@ function respondZip(res, zipName, builder) {
 // - file: document (required)
 // - to: target language code (required)
 // - from: source language code (optional)
-// - projectId: GCP project id (optional; defaults to env)
-// - location: location id (optional; defaults to env/global)
 // - mimeType: MIME type (optional; defaults to upload mimetype)
 app.post('/translate-doc', upload.single('file'), async (req, res) => {
   try {
-    const projectId = await getProjectId(req);
+    const projectId = getProjectId();
 
     if (!projectId) {
       return res.status(400).json({
-        error: 'Missing projectId. Provide projectId field or set GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT.'
+        error: 'Missing projectId. Set GCP_PROJECT_ID in .env.'
       });
     }
 
@@ -181,7 +290,7 @@ app.post('/translate-doc', upload.single('file'), async (req, res) => {
     }
 
     const sourceLanguageCode = req.body.from || undefined;
-    const location = req.body.location || process.env.GCP_LOCATION || 'global';
+    const location = config.GCP_LOCATION;
     const mimeType =
       req.body.mimeType ||
       req.file.mimetype ||
@@ -219,15 +328,13 @@ app.post('/translate-doc', upload.single('file'), async (req, res) => {
 // - file: image (required)
 // - to: target language code (required)
 // - from: source language code (optional)
-// - projectId: GCP project id (optional; defaults to env)
-// - location: location id (optional; defaults to env/global)
 app.post('/translate-image', upload.single('file'), async (req, res) => {
   try {
-    const projectId = await getProjectId(req);
+    const projectId = getProjectId();
 
     if (!projectId) {
       return res.status(400).json({
-        error: 'Missing projectId. Provide projectId field or set GCP_PROJECT_ID/GOOGLE_CLOUD_PROJECT.'
+        error: 'Missing projectId. Set GCP_PROJECT_ID in .env.'
       });
     }
 
@@ -241,7 +348,7 @@ app.post('/translate-image', upload.single('file'), async (req, res) => {
     }
 
     const sourceLanguageCode = req.body.from || undefined;
-    const location = req.body.location || process.env.GCP_LOCATION || 'global';
+    const location = config.GCP_LOCATION;
 
     const ocrText = await ocrImageToText({ content: req.file.buffer });
     if (!ocrText.trim()) {
@@ -279,10 +386,10 @@ app.post(
   ]),
   async (req, res) => {
   try {
-    const projectId = await getProjectId(req);
+    const projectId = getProjectId();
     if (!projectId) {
       return res.status(400).send(
-        'Missing projectId. Set GCP_PROJECT_ID (recommended) or configure ADC via: gcloud auth application-default login.'
+        'Missing projectId. Set GCP_PROJECT_ID in .env.'
       );
     }
 
@@ -295,11 +402,84 @@ app.post(
     }
 
     const sourceLanguageCode = req.body.from || undefined;
-    const location = req.body.location || process.env.GCP_LOCATION || 'global';
+    const location = config.GCP_LOCATION;
+    // spacing between each translated file (only used when combineImages produces a single TXT)
+    const betweenTranslationsLines = parseSpacingLines(
+      req.body.betweenTranslationsLines != null ? req.body.betweenTranslationsLines : req.body.spacingLines
+    );
 
     const combineImages = isTruthy(req.body.combineImages);
+    const combineAllToTxt = isTruthy(req.body.combineAllToTxt);
 
     if (uploadedFiles.length > 1) {
+      if (combineAllToTxt) {
+        const blocks = await asyncPool(IMAGE_BATCH_SIZE, uploadedFiles, async (f) => {
+          const title = f.originalname || 'file';
+          const uploadMime = f.mimetype || '';
+          const fallbackMime = inferMimeTypeFromName(f.originalname);
+          const effectiveMimeType =
+            uploadMime && uploadMime !== 'application/octet-stream' ? uploadMime : fallbackMime;
+
+          try {
+            if (isImageMime(effectiveMimeType)) {
+              const ocrText = await ocrImageToText({ content: f.buffer });
+              if (!ocrText.trim()) {
+                return { title, text: '[ERRO] OCR não detectou texto.' };
+              }
+
+              const { translatedText } = await translatePlainText({
+                projectId,
+                location,
+                text: ocrText,
+                sourceLanguageCode,
+                targetLanguageCode
+              });
+
+              return { title, text: normalizeTextForTxt(translatedText || '') };
+            }
+
+            const mimeType = effectiveMimeType || req.body.mimeType;
+            if (!mimeType) {
+              return { title, text: '[ERRO] Não foi possível determinar o MIME type.' };
+            }
+
+            const { outputBuffer, outputMimeType } = await translateDocumentBuffer({
+              projectId,
+              location,
+              content: f.buffer,
+              mimeType,
+              sourceLanguageCode,
+              targetLanguageCode
+            });
+
+            const extracted = await extractTextFromTranslatedDocument({
+              outputBuffer,
+              outputMimeType,
+              originalname: f.originalname
+            });
+
+            return { title, text: extracted };
+          } catch (err) {
+            return { title, text: `[ERRO] ${err && err.message ? err.message : String(err)}` };
+          }
+        });
+
+        let combined = '';
+        for (let i = 0; i < blocks.length; i += 1) {
+          const b = blocks[i];
+          combined += blockSeparator(b.title);
+          combined += `${b.text || ''}\n`;
+          if (i < blocks.length - 1 && betweenTranslationsLines > 0) {
+            combined += '\n'.repeat(betweenTranslationsLines);
+          }
+        }
+
+        const filename = `combined_${targetLanguageCode}_translations.txt`;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.status(200).send(combined);
+      }
+
       // If user asked for a single output and ALL files are images, return a single TXT.
       if (combineImages) {
         const classified = uploadedFiles.map((f) => {
@@ -336,9 +516,15 @@ app.post(
             }
           });
 
-          const combined = results
-            .map((r) => `===== ${r.title} =====\n${r.text}\n`)
-            .join('\n');
+          let combined = '';
+          for (let i = 0; i < results.length; i += 1) {
+            const r = results[i];
+            combined += blockSeparator(r.title);
+            combined += `${normalizeTextForTxt(r.text)}\n`;
+            if (i < results.length - 1 && betweenTranslationsLines > 0) {
+              combined += '\n'.repeat(betweenTranslationsLines);
+            }
+          }
 
           const filename = `images_${targetLanguageCode}_translations.txt`;
           res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -480,7 +666,7 @@ app.use((err, _req, res, next) => {
   return next(err);
 });
 
-function startServer(port = Number(process.env.PORT || 3003)) {
+function startServer(port = config.PORT) {
   const server = app.listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`DocTranslator server listening on http://localhost:${port}`);

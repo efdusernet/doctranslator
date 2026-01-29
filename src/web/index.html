@@ -146,6 +146,15 @@
               Quando enviar múltiplas imagens, gerar um único TXT (em vez de ZIP)
             </label>
 
+            <label>
+              <input id="combineAllToTxt" type="checkbox" />
+              Gerar um único TXT mesmo com mistura de arquivos (imagens + documentos)
+            </label>
+
+            <label>Espaçamento entre traduções (quando gerar TXT único)</label>
+            <input id="betweenTranslationsLines" type="text" inputmode="numeric" placeholder="0" value="0" />
+            <div class="hint">Aplica ao TXT único (combineImages ou combineAllToTxt). Máx: 20.</div>
+
             <div class="btnbar">
               <button id="submit" type="submit">Traduzir</button>
               <button id="clear" type="button" class="ghost">Limpar</button>
@@ -242,6 +251,12 @@
 
         const combineImages = document.getElementById('combineImages').checked;
         if (combineImages) fd.append('combineImages', 'true');
+
+        const combineAllToTxt = document.getElementById('combineAllToTxt').checked;
+        if (combineAllToTxt) fd.append('combineAllToTxt', 'true');
+
+        const betweenTranslationsLines = document.getElementById('betweenTranslationsLines').value.trim();
+        if (betweenTranslationsLines) fd.append('betweenTranslationsLines', betweenTranslationsLines);
 
         const from = document.getElementById('from').value.trim();
         if (from) fd.append('from', from);
