@@ -151,6 +151,13 @@
               Gerar um único TXT mesmo com mistura de arquivos (imagens + documentos)
             </label>
 
+            <label>Formato de saída (documentos)</label>
+            <select id="outputFormat">
+              <option value="same" selected>Manter formato original (padrão)</option>
+              <option value="docx">Converter PDF para Word (DOCX) (PDF nativo, via batch)</option>
+            </select>
+            <div class="hint">A conversão PDF→DOCX exige <span class="mono">GCS_TRANSLATION_BUCKET</span> no servidor e funciona apenas para PDF nativo (não escaneado).</div>
+
             <label>Espaçamento entre traduções (quando gerar TXT único)</label>
             <input id="betweenTranslationsLines" type="text" inputmode="numeric" placeholder="0" value="0" />
             <div class="hint">Aplica ao TXT único (combineImages ou combineAllToTxt). Máx: 20.</div>
@@ -257,6 +264,9 @@
 
         const betweenTranslationsLines = document.getElementById('betweenTranslationsLines').value.trim();
         if (betweenTranslationsLines) fd.append('betweenTranslationsLines', betweenTranslationsLines);
+
+        const outputFormat = (document.getElementById('outputFormat') || {}).value;
+        if (outputFormat) fd.append('outputFormat', outputFormat);
 
         const from = document.getElementById('from').value.trim();
         if (from) fd.append('from', from);

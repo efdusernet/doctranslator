@@ -8,7 +8,7 @@ const archiver = require('archiver');
 
 const config = require('./config');
 
-const { translateDocumentBuffer } = require('./translateDocument');
+const { translateDocumentBuffer, translatePdfToDocxBuffer } = require('./translateDocument');
 const { ocrImageToText, translatePlainText } = require('./translateImage');
 
 const app = express();
@@ -72,6 +72,12 @@ function blockSeparator(title) {
 function normalizeTextForTxt(value) {
   if (!value) return '';
   return String(value).replace(/\r\n/g, '\n');
+}
+
+function extForMimeType(mimeType) {
+  if (!mimeType) return '';
+  const ext = mimeTypes.extension(mimeType);
+  return ext ? `.${ext}` : '';
 }
 
 function decodeXmlEntities(value) {
@@ -410,6 +416,8 @@ app.post(
 
     const combineImages = isTruthy(req.body.combineImages);
     const combineAllToTxt = isTruthy(req.body.combineAllToTxt);
+    const outputFormatRaw = String(req.body.outputFormat || 'same').trim().toLowerCase();
+    const outputFormat = outputFormatRaw === 'docx' || outputFormatRaw === 'word' ? 'docx' : 'same';
 
     if (uploadedFiles.length > 1) {
       if (combineAllToTxt) {
@@ -571,19 +579,30 @@ app.post(
               continue;
             }
 
-            const { outputBuffer } = await translateDocumentBuffer({
-              projectId,
-              location,
-              content: f.buffer,
-              mimeType,
-              sourceLanguageCode,
-              targetLanguageCode
-            });
+            let output;
+            if (outputFormat === 'docx' && (mimeType || '').toLowerCase() === 'application/pdf') {
+              output = await translatePdfToDocxBuffer({
+                projectId,
+                location,
+                content: f.buffer,
+                sourceLanguageCode,
+                targetLanguageCode
+              });
+            } else {
+              output = await translateDocumentBuffer({
+                projectId,
+                location,
+                content: f.buffer,
+                mimeType,
+                sourceLanguageCode,
+                targetLanguageCode
+              });
+            }
 
-            const name = `${safeBaseName(f.originalname)}_${targetLanguageCode}_translations${path.extname(
-              f.originalname || ''
-            )}`;
-            archive.append(outputBuffer, { name });
+            const nameExt =
+              extForMimeType(output.outputMimeType) || path.extname(f.originalname || '') || '';
+            const name = `${safeBaseName(f.originalname)}_${targetLanguageCode}_translations${nameExt}`;
+            archive.append(output.outputBuffer, { name });
           } catch (err) {
             archive.append(`${err && err.message ? err.message : String(err)}\n`, {
               name: `${safeBaseName(f.originalname)}_error.txt`
@@ -629,17 +648,31 @@ app.post(
       return res.status(400).send('Could not determine MIME type. Please upload a supported file.');
     }
 
-    const { outputBuffer, outputMimeType, detectedLanguageCode } = await translateDocumentBuffer({
-      projectId,
-      location,
-      content: f.buffer,
-      mimeType,
-      sourceLanguageCode,
-      targetLanguageCode
-    });
+    let output;
+    if (outputFormat === 'docx' && (mimeType || '').toLowerCase() === 'application/pdf') {
+      output = await translatePdfToDocxBuffer({
+        projectId,
+        location,
+        content: f.buffer,
+        sourceLanguageCode,
+        targetLanguageCode
+      });
+    } else {
+      output = await translateDocumentBuffer({
+        projectId,
+        location,
+        content: f.buffer,
+        mimeType,
+        sourceLanguageCode,
+        targetLanguageCode
+      });
+    }
+
+    const { outputBuffer, outputMimeType, detectedLanguageCode } = output;
 
     const base = safeBaseName(f.originalname) || 'document';
-    const filename = `${base}_${targetLanguageCode}_translations${path.extname(f.originalname || '')}`;
+    const outExt = extForMimeType(outputMimeType) || path.extname(f.originalname || '') || '';
+    const filename = `${base}_${targetLanguageCode}_translations${outExt}`;
 
     res.setHeader('Content-Type', outputMimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

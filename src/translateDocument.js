@@ -1,12 +1,14 @@
 const fs = require('fs/promises');
 const path = require('path');
 const mime = require('mime-types');
+const crypto = require('crypto');
 
 const config = require('./config');
 
 const { PDFDocument } = require('pdf-lib');
 
 const { TranslationServiceClient } = require('@google-cloud/translate').v3;
+const { Storage } = require('@google-cloud/storage');
 
 const SUPPORTED_MIME_TYPES = new Set([
   'application/pdf',
@@ -39,6 +41,109 @@ function extForMimeType(mimeType) {
   // mime-types lib returns leading dot, e.g. '.pdf'
   const ext = mime.extension(mimeType);
   return ext ? `.${ext}` : undefined;
+}
+
+function randomId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return crypto.randomBytes(16).toString('hex');
+}
+
+function stripLeadingSlash(value) {
+  if (!value) return '';
+  return String(value).replace(/^\/+/, '');
+}
+
+function makeGsUri(bucket, objectName) {
+  return `gs://${bucket}/${stripLeadingSlash(objectName)}`;
+}
+
+async function translatePdfToDocxBuffer({
+  projectId = config.GCP_PROJECT_ID,
+  location = config.GCP_LOCATION,
+  gcsBucket = config.GCS_TRANSLATION_BUCKET,
+  content,
+  sourceLanguageCode,
+  targetLanguageCode
+}) {
+  if (!projectId) throw new Error('projectId é obrigatório');
+  if (!targetLanguageCode) throw new Error('targetLanguageCode é obrigatório');
+  if (!gcsBucket) {
+    throw new Error(
+      'Para PDF→DOCX é necessário configurar GCS_TRANSLATION_BUCKET no .env (bucket do Cloud Storage).'
+    );
+  }
+  if (!content || content.length === 0) throw new Error('content vazio');
+
+  const storage = new Storage();
+  const bucket = storage.bucket(gcsBucket);
+
+  const jobId = randomId();
+  const inputObject = `doctranslator/input/${jobId}/input.pdf`;
+  const outputPrefix = `doctranslator/output/${jobId}/`;
+
+  await bucket.file(inputObject).save(content, {
+    contentType: 'application/pdf',
+    resumable: false
+  });
+
+  const client = new TranslationServiceClient();
+  const parent = `projects/${projectId}/locations/${location}`;
+
+  const request = {
+    parent,
+    targetLanguageCodes: [targetLanguageCode],
+    inputConfigs: [
+      {
+        gcsSource: { inputUri: makeGsUri(gcsBucket, inputObject) },
+        mimeType: 'application/pdf'
+      }
+    ],
+    outputConfig: {
+      gcsDestination: {
+        outputUriPrefix: makeGsUri(gcsBucket, outputPrefix)
+      }
+    },
+    formatConversions: {
+      'application/pdf':
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    }
+  };
+
+  if (sourceLanguageCode) request.sourceLanguageCode = sourceLanguageCode;
+
+  try {
+    const [operation] = await client.batchTranslateDocument(request);
+    await operation.promise();
+
+    const [files] = await bucket.getFiles({ prefix: outputPrefix });
+    const docx = files.find((f) => f.name.toLowerCase().endsWith('.docx'));
+    if (!docx) {
+      throw new Error(
+        'BatchTranslateDocument concluiu, mas não foi encontrado arquivo .docx no output do GCS. '
+          + 'Isso pode acontecer se o PDF não for nativo (escaneado) ou se a conversão tiver sido rejeitada.'
+      );
+    }
+
+    const [downloaded] = await docx.download();
+    return {
+      outputBuffer: Buffer.from(downloaded),
+      outputMimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      detectedLanguageCode: ''
+    };
+  } finally {
+    // Best-effort cleanup (ignore any errors)
+    try {
+      await bucket.file(inputObject).delete();
+    } catch (_e) {
+      // ignore
+    }
+    try {
+      const [outFiles] = await bucket.getFiles({ prefix: outputPrefix });
+      await Promise.all(outFiles.map((f) => f.delete().catch(() => null)));
+    } catch (_e) {
+      // ignore
+    }
+  }
 }
 
 async function splitPdfIntoChunks(inputBuffer, chunkSize) {
@@ -267,5 +372,6 @@ async function translateLocalDocument({
 
 module.exports = {
   translateDocumentBuffer,
-  translateLocalDocument
+  translateLocalDocument,
+  translatePdfToDocxBuffer
 };
