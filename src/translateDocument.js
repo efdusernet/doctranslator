@@ -17,6 +17,15 @@ const SUPPORTED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 ]);
 
+function isModelLocationMismatchError(err) {
+  const msg = err && err.message ? String(err.message) : String(err || '');
+  return msg.includes('Model location is different from requested location');
+}
+
+function makeParent(projectId, location) {
+  return `projects/${projectId}/locations/${location}`;
+}
+
 function normalizeBytesToBuffer(value) {
   if (!value) return Buffer.alloc(0);
   if (Buffer.isBuffer(value)) return value;
@@ -102,37 +111,46 @@ async function translatePdfToDocxBuffer({
   });
 
   const client = new TranslationServiceClient();
-  const parent = `projects/${projectId}/locations/${location}`;
-  const model = `${parent}/models/general/nmt`;
 
-  const request = {
-    parent,
-    targetLanguageCodes: [targetLanguageCode],
-    inputConfigs: [
-      {
-        gcsSource: { inputUri: makeGsUri(bucketName, inputObject) },
-        mimeType: 'application/pdf'
+  const tryOnce = async (loc) => {
+    const parent = makeParent(projectId, loc);
+    const model = `${parent}/models/general/nmt`;
+
+    const request = {
+      parent,
+      targetLanguageCodes: [targetLanguageCode],
+      inputConfigs: [
+        {
+          gcsSource: { inputUri: makeGsUri(bucketName, inputObject) },
+          mimeType: 'application/pdf'
+        }
+      ],
+      outputConfig: {
+        gcsDestination: {
+          outputUriPrefix: makeGsUri(bucketName, outputPrefix)
+        }
+      },
+      models: {
+        [targetLanguageCode]: model
+      },
+      formatConversions: {
+        'application/pdf':
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       }
-    ],
-    outputConfig: {
-      gcsDestination: {
-        outputUriPrefix: makeGsUri(bucketName, outputPrefix)
-      }
-    },
-    models: {
-      [targetLanguageCode]: model
-    },
-    formatConversions: {
-      'application/pdf':
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    }
-  };
+    };
 
-  if (sourceLanguageCode) request.sourceLanguageCode = sourceLanguageCode;
-
-  try {
+    request.sourceLanguageCode = sourceLanguageCode;
     const [operation] = await client.batchTranslateDocument(request);
     await operation.promise();
+  };
+
+  try {
+    try {
+      await tryOnce(location);
+    } catch (err) {
+      if (!isModelLocationMismatchError(err) || (location || '').toLowerCase() === 'global') throw err;
+      await tryOnce('global');
+    }
 
     const [files] = await bucket.getFiles({ prefix: outputPrefix });
     const docx = files.find((f) => f.name.toLowerCase().endsWith('.docx'));
@@ -214,35 +232,47 @@ async function translatePdfWithSplittingIfNeeded({
   }
 
   const client = new TranslationServiceClient();
-  const parent = `projects/${projectId}/locations/${location}`;
   const model = `${parent}/models/general/nmt`;
 
   const outputs = [];
   let detectedLanguageCode = '';
 
   for (const chunk of chunks) {
-    const request = {
-      parent,
-      targetLanguageCode,
-      model,
-      documentInputConfig: {
-        content: chunk,
-        mimeType: 'application/pdf'
+    const callOnce = async (loc) => {
+      const parent = makeParent(projectId, loc);
+      const model = `${parent}/models/general/nmt`;
+
+      const request = {
+        parent,
+        targetLanguageCode,
+        model,
+        documentInputConfig: {
+          content: chunk,
+          mimeType: 'application/pdf'
+        }
+      };
+
+      if (sourceLanguageCode) request.sourceLanguageCode = sourceLanguageCode;
+      if (typeof isTranslateNativePdfOnly === 'boolean') {
+        request.isTranslateNativePdfOnly = isTranslateNativePdfOnly;
       }
+      if (typeof enableShadowRemovalNativePdf === 'boolean') {
+        request.enableShadowRemovalNativePdf = enableShadowRemovalNativePdf;
+      }
+      if (typeof enableRotationCorrection === 'boolean') {
+        request.enableRotationCorrection = enableRotationCorrection;
+      }
+
+      return client.translateDocument(request);
     };
 
-    if (sourceLanguageCode) request.sourceLanguageCode = sourceLanguageCode;
-    if (typeof isTranslateNativePdfOnly === 'boolean') {
-      request.isTranslateNativePdfOnly = isTranslateNativePdfOnly;
+    let response;
+    try {
+      [response] = await callOnce(location);
+    } catch (err) {
+      if (!isModelLocationMismatchError(err) || (location || '').toLowerCase() === 'global') throw err;
+      [response] = await callOnce('global');
     }
-    if (typeof enableShadowRemovalNativePdf === 'boolean') {
-      request.enableShadowRemovalNativePdf = enableShadowRemovalNativePdf;
-    }
-    if (typeof enableRotationCorrection === 'boolean') {
-      request.enableRotationCorrection = enableRotationCorrection;
-    }
-
-    const [response] = await client.translateDocument(request);
     const translation = response.documentTranslation;
     if (!translation || !translation.byteStreamOutputs || translation.byteStreamOutputs.length < 1) {
       throw new Error('Resposta inesperada: byteStreamOutputs vazio.');
@@ -298,32 +328,42 @@ async function translateDocumentBuffer({
   }
 
   const client = new TranslationServiceClient();
-  const parent = `projects/${projectId}/locations/${location}`;
-  const model = `${parent}/models/general/nmt`;
+  const callOnce = async (loc) => {
+    const parent = makeParent(projectId, loc);
+    const model = `${parent}/models/general/nmt`;
 
-  const request = {
-    parent,
-    targetLanguageCode,
-    model,
-    documentInputConfig: {
-      content,
-      mimeType
+    const request = {
+      parent,
+      targetLanguageCode,
+      model,
+      documentInputConfig: {
+        content,
+        mimeType
+      }
+    };
+
+    if (sourceLanguageCode) request.sourceLanguageCode = sourceLanguageCode;
+
+    if (typeof isTranslateNativePdfOnly === 'boolean') {
+      request.isTranslateNativePdfOnly = isTranslateNativePdfOnly;
     }
+    if (typeof enableShadowRemovalNativePdf === 'boolean') {
+      request.enableShadowRemovalNativePdf = enableShadowRemovalNativePdf;
+    }
+    if (typeof enableRotationCorrection === 'boolean') {
+      request.enableRotationCorrection = enableRotationCorrection;
+    }
+
+    return client.translateDocument(request);
   };
 
-  if (sourceLanguageCode) request.sourceLanguageCode = sourceLanguageCode;
-
-  if (typeof isTranslateNativePdfOnly === 'boolean') {
-    request.isTranslateNativePdfOnly = isTranslateNativePdfOnly;
+  let response;
+  try {
+    [response] = await callOnce(location);
+  } catch (err) {
+    if (!isModelLocationMismatchError(err) || (location || '').toLowerCase() === 'global') throw err;
+    [response] = await callOnce('global');
   }
-  if (typeof enableShadowRemovalNativePdf === 'boolean') {
-    request.enableShadowRemovalNativePdf = enableShadowRemovalNativePdf;
-  }
-  if (typeof enableRotationCorrection === 'boolean') {
-    request.enableRotationCorrection = enableRotationCorrection;
-  }
-
-  const [response] = await client.translateDocument(request);
 
   const translation = response.documentTranslation;
   if (!translation || !translation.byteStreamOutputs || translation.byteStreamOutputs.length < 1) {
